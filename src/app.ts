@@ -1,7 +1,8 @@
+import fs from 'fs'
 import path from 'path'
 import express, { NextFunction, Request, Response } from 'express'
 import swaggerUi from 'swagger-ui-express'
-import YAML from 'yamljs'
+import { parse } from 'yaml'
 import { createRepoRouter } from './routes'
 import { PullRequestSource } from './github/client'
 import { RateLimitError, UpstreamError } from './github/errors'
@@ -12,7 +13,7 @@ export interface AppOptions {
   logError?: (message: string) => void
 }
 
-const swaggerDocument = YAML.load(path.join(__dirname, '..', 'docs', 'api-spec.yaml'))
+const swaggerDocument = parse(fs.readFileSync(path.join(__dirname, '..', 'docs', 'api-spec.yaml'), 'utf8'))
 
 export function createApp({ apiPrefix, source, logError = console.error }: AppOptions) {
   const app = express()
