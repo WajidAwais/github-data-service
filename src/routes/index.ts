@@ -1,50 +1,62 @@
-import express, { Request, Response } from 'express'
-import { getAllPullRequests, summarizePullRequestsByMonth } from '../controllers/RepoController'
-import { Summary } from '../types'
+import express, { NextFunction, Request, RequestHandler, Response } from 'express'
+import { summarizePullRequestsByMonth } from '../summary'
+import { PullRequestSource } from '../github/client'
 
-const router = express.Router()
+const MONTH_RE = /^(0?[1-9]|1[0-2])$/
+const YEAR_RE = /^\d{4}$/
 
-router.get('/', async (req: Request, res: Response) => {
-  const pullRequests = await getAllPullRequests()
-  const summary: Summary[] = summarizePullRequestsByMonth(pullRequests)
-
-  res.send(summary)
-})
-
-router.get('/summary', async (req: Request, res: Response) => {
-  const { month, year } = req.query
-
-  if (!month || !year) {
-    return res.status(400).send({ error: 'Both month and year query parameters are required.' })
+const asyncRoute =
+  (handler: (req: Request, res: Response) => Promise<unknown>): RequestHandler =>
+  (req: Request, res: Response, next: NextFunction) => {
+    handler(req, res).catch(next)
   }
 
-  const pullRequests = await getAllPullRequests()
-  const summary: Summary[] = summarizePullRequestsByMonth(pullRequests)
+// Repeated query keys arrive as arrays; only a single string is valid input.
+const single = (value: unknown): string | undefined => (typeof value === 'string' ? value : undefined)
 
-  const targetMonth = new Date(`${year}-${month}-01`).toLocaleString('default', { month: 'long', year: 'numeric' })
+export function createRepoRouter(source: PullRequestSource) {
+  const router = express.Router()
 
-  const monthSummary = summary.find(item => item.month === targetMonth)
+  router.get(
+    '/',
+    asyncRoute(async (_req, res) => {
+      res.send(summarizePullRequestsByMonth(await source.listPullRequests()))
+    }),
+  )
 
-  if (!monthSummary) return res.status(404).send({ error: 'No data found for the given month and year.' })
+  router.get(
+    '/summary',
+    asyncRoute(async (req, res) => {
+      const month = single(req.query.month)
+      const year = single(req.query.year)
+      if (!month || !year) {
+        return res.status(400).send({ error: 'Both month and year query parameters are required.' })
+      }
+      if (!MONTH_RE.test(month) || !YEAR_RE.test(year)) {
+        return res.status(400).send({ error: 'month must be 1-12 and year a four-digit year.' })
+      }
 
-  res.send(monthSummary)
-})
+      const period = `${year}-${month.padStart(2, '0')}`
+      const summary = summarizePullRequestsByMonth(await source.listPullRequests())
+      const monthSummary = summary.find((item) => item.period === period)
+      if (!monthSummary) return res.status(404).send({ error: 'No data found for the given month and year.' })
+      res.send(monthSummary)
+    }),
+  )
 
-router.get('/year-summary', async (req: Request, res: Response) => {
-  const { year } = req.query
+  router.get(
+    '/year-summary',
+    asyncRoute(async (req, res) => {
+      const year = single(req.query.year)
+      if (!year) return res.status(400).send({ error: 'The year query parameter is required.' })
+      if (!YEAR_RE.test(year)) return res.status(400).send({ error: 'year must be a four-digit year.' })
 
-  if (!year) return res.status(400).send({ error: 'The year query parameter is required.' })
+      const summary = summarizePullRequestsByMonth(await source.listPullRequests())
+      const yearSummary = summary.filter((item) => item.period.startsWith(`${year}-`))
+      if (yearSummary.length === 0) return res.status(404).send({ error: 'No data found for the given year.' })
+      res.send(yearSummary)
+    }),
+  )
 
-  const pullRequests = await getAllPullRequests()
-  const summary = summarizePullRequestsByMonth(pullRequests)
-
-  const yearSummary = summary.filter(item => {
-    return new Date(item.month).getFullYear() === parseInt(year as string, 10)
-  })
-
-  if (yearSummary.length === 0) return res.status(404).send({ error: 'No data found for the given year.' })
-
-  res.send(yearSummary)
-})
-
-export default router
+  return router
+}

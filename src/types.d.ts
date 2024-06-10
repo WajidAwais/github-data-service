@@ -8,6 +8,9 @@ export interface PullRequest {
 }
 
 export interface Summary {
+  /** Machine-readable month, e.g. "2021-09". */
+  period: string;
+  /** Human-readable month, e.g. "September 2021". */
   month: string;
   opened: number;
   closed: number;
