@@ -1,0 +1,24 @@
+# Dependencies and build output
+node_modules/
+dist/
+coverage/
+
+# Environment files (keep the template)
+.env
+.env.*
+!.env.example
+
+# Logs, caches and scratch
+*.log
+npm-debug.log*
+.npm/
+.eslintcache
+tmp/
+
+# Editors and OS
+.DS_Store
+.vscode/
+.idea/
+
+# Not part of this project
+.github/
