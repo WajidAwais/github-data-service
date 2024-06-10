@@ -1,31 +1,58 @@
-openapi: 3.0.0
+openapi: 3.0.3
 info:
-  title: Github API
+  title: Recurate
   version: 1.0.0
+  description: >
+    Monthly opened/closed pull request counts for one GitHub repository
+    (downshift-js/downshift by default, set with GITHUB_OWNER/GITHUB_REPO).
+    The repository is fixed at startup; no request parameter can change
+    which repository or host is queried.
+
+servers:
+  - url: /
 
 paths:
+  /health:
+    get:
+      summary: Liveness check
+      description: Does not call GitHub.
+      responses:
+        '200':
+          description: The service is running
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+
   /api/v1/repo/stats:
     get:
-      summary: Get a summary of pull requests for all months
-      description: Retrieve a summary of opened and closed pull requests grouped by month for the Downshift repository.
+      summary: Pull request summary for every month
+      description: Opened and closed pull requests grouped by UTC month, oldest first.
       responses:
-        200:
-          description: A successful response with the summary of pull requests by month
+        '200':
+          description: One entry per month with activity
           content:
             application/json:
               schema:
                 type: array
                 items:
                   $ref: '#/components/schemas/Summary'
+        '502':
+          $ref: '#/components/responses/UpstreamError'
+        '503':
+          $ref: '#/components/responses/RateLimited'
 
-  api/v1/repo/stats/summary:
+  /api/v1/repo/stats/summary:
     get:
-      summary: Get a summary of pull requests for a specific month and year
-      description: Retrieve a summary of opened and closed pull requests for a given month and year in the Downshift repository.
+      summary: Pull request summary for one month
       parameters:
         - name: month
           in: query
-          description: The target month (1-12)
+          description: The target month, 1-12 (a leading zero is allowed)
           required: true
           schema:
             type: integer
@@ -33,80 +60,112 @@ paths:
             maximum: 12
         - name: year
           in: query
-          description: The target year
+          description: The target four-digit year
           required: true
           schema:
             type: integer
+            minimum: 1000
+            maximum: 9999
       responses:
-        200:
-          description: A successful response with the summary of pull requests for the specified month and year
+        '200':
+          description: The summary for that month
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/Summary'
-        400:
-          description: Bad request due to missing required query parameters
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        404:
-          description: No data found for the given month and year
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '502':
+          $ref: '#/components/responses/UpstreamError'
+        '503':
+          $ref: '#/components/responses/RateLimited'
 
   /api/v1/repo/stats/year-summary:
     get:
-      summary: Get a summary of pull requests for a specific year
-      description: Retrieve a summary of opened and closed pull requests grouped by month for a given year in the Downshift repository.
+      summary: Pull request summary for each month of one year
       parameters:
         - name: year
           in: query
-          description: The target year
+          description: The target four-digit year
           required: true
           schema:
             type: integer
+            minimum: 1000
+            maximum: 9999
       responses:
-        200:
-          description: A successful response with the summary of pull requests by month for the specified year
+        '200':
+          description: One entry per month with activity in that year
           content:
             application/json:
               schema:
                 type: array
                 items:
                   $ref: '#/components/schemas/Summary'
-        400:
-          description: Bad request due to missing required query parameter
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        404:
-          description: No data found for the given year
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '502':
+          $ref: '#/components/responses/UpstreamError'
+        '503':
+          $ref: '#/components/responses/RateLimited'
 
 components:
   schemas:
     Summary:
       type: object
+      required: [period, month, opened, closed]
       properties:
+        period:
+          type: string
+          description: The month as YYYY-MM (UTC)
+          example: '2021-09'
         month:
           type: string
-          description: The month and year (e.g., January 2021)
+          description: The month and year in English
+          example: September 2021
         opened:
           type: integer
-          description: The number of pull requests opened in the specified month
+          description: Pull requests opened in the month
         closed:
           type: integer
-          description: The number of pull requests closed in the specified month
+          description: Pull requests closed (merged or not) in the month
     Error:
       type: object
       properties:
         error:
           type: string
-          description: The error message
+          description: A fixed, human-readable message
+
+  responses:
+    BadRequest:
+      description: A required query parameter is missing, repeated or out of range
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    NotFound:
+      description: No pull request activity in the requested period
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    UpstreamError:
+      description: GitHub could not be reached or returned an error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    RateLimited:
+      description: GitHub's rate limit is exhausted
+      headers:
+        Retry-After:
+          description: Seconds until GitHub's quota resets
+          schema:
+            type: integer
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
